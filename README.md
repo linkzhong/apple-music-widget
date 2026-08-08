@@ -1,162 +1,264 @@
-# Apple Music 小组件（macOS）
+# Apple Music Widget for macOS
 
-Apple 在 macOS 上给 Podcast 做了小组件，却没给「音乐」做。这个项目补上。
+[English](README.md) · [简体中文](README.zh-CN.md)
+
+Apple ships a Podcasts widget on macOS but never made one for Music. This fills the gap —
+and does something people generally believe widgets can't: **lyrics that scroll smoothly,
+inside a real WidgetKit widget.**
 
 | | |
 |:--|:--|
 | <img src="docs/preview_small.png" width="300"> | <img src="docs/preview_medium.png" width="620"> |
-| **小尺寸**：整张专辑封面铺到边，底部放歌名和播放控制 | **中尺寸**：只有歌词。上一句 + 当前句（放大）+ 未来两句 |
+| **Small** — full-bleed album art, title and transport controls | **Medium** — lyrics only, current line scaled up, with Chinese translation for English songs |
 
-- 播放状态、封面、进度、播放控制全部来自 **Apple Music 本体**
-- 歌词跟着播放走，自动匹配
-- **英文歌自动带中文翻译**，显示在原文下面
-- 封面来自 Apple 官方的 iTunes 接口，和 Apple Music 里是同一张
+## What it does
 
-## 安装
+- **Smoothly scrolling synced lyrics** — lines glide up and scale into place, at full frame
+  rate, in a native desktop widget
+- **Chinese translation for English songs**, rendered under the original line
+- **Real-time playback state** — title, artist, album, artwork, all straight from Music.app
+- **Playback controls** in the widget — previous / play-pause / next, no app switch
+- **Artwork from Apple's own iTunes endpoint**, so it's the exact image Apple Music shows
 
-需要 macOS 14+、Xcode、以及 [xcodegen](https://github.com/yonaskolb/XcodeGen)（`brew install xcodegen`）。
+### On the scrolling
+
+As far as we can tell, no other project does this **inside a WidgetKit widget**. Not because
+it's hard to want — because the received wisdom is that widgets can't animate, so everyone who
+wanted motion built a window instead. [Canopy](https://github.com/6gx42o/Canopy) renders its
+lyrics in a custom SwiftUI window, [LyricGlow](https://github.com/ateymoori/lyricglow) is an
+Electron always-on-top window, [Vinyl for Mac](https://www.vinylformac.com/) is a floating
+window. This project went down that road too, and came back.
+
+The received wisdom is half right. Widgets genuinely cannot run *continuous* animation — the
+process is suspended after each frame. But when the timeline advances, the system **does**
+interpolate between the old and new state at full frame rate. Lyric scrolling has a natural
+trigger on every line, so it fits that second category exactly. Two things make it work, and
+both are easy to get wrong — details in [Notes from building this](#notes-from-building-this).
+
+Everything about playback comes from Music.app itself. Only lyrics and streaming-track
+artwork come from elsewhere, and there's a hard reason for that — see below.
+
+## Install
+
+Requires macOS 14+, Xcode, and [xcodegen](https://github.com/yonaskolb/XcodeGen)
+(`brew install xcodegen`).
 
 ```bash
-git clone <这个仓库>
+git clone https://github.com/linkzhong/apple-music-widget
 cd apple-music-widget
 
-# 换成你自己的 Apple Developer Team ID
+# Set your own Apple Developer Team ID
 Tools/set-team-id.sh ABCDE12345
 
 xcodegen generate
 xcodebuild -project AppleMusicWidget.xcodeproj -scheme MusicWidgetHost \
   -configuration Release -derivedDataPath build build
 
-cp -R build/Build/Products/Release/MusicWidgetHost.app "/Applications/Apple Music 小组件.app"
-open "/Applications/Apple Music 小组件.app"
+cp -R build/Build/Products/Release/MusicWidgetHost.app "/Applications/Apple Music Widget.app"
+open "/Applications/Apple Music Widget.app"
 ```
 
-必须装到 `/Applications`，系统才扫得到里面的小组件。首次运行会请求「控制"音乐"」的权限，必须允许。
+It **must** live in `/Applications` — that's where the system scans for widget extensions.
+On first launch it asks for permission to control Music; you have to allow it.
 
-然后在桌面空白处点右键 →「编辑小组件」→ 找到「Apple Music」→ 拖到桌面上。
+Then right-click the desktop → **Edit Widgets** → find **Apple Music** → drop it on the desktop.
 
-**菜单栏那个 App 要一直开着**，关掉小组件就停在最后状态不再更新。建议在它菜单里打开「开机时自动启动」。
+**Keep the menu bar app running.** Close it and the widget freezes on its last state.
+Turn on "Launch at login" from its menu.
 
-## 为什么需要一个后台 App
+## Why there's a background app
 
-小组件必须跑在沙箱里，沙箱进程不能给「音乐」发 Apple Event —— 读不到播放状态，更控制不了播放。所以是这个结构：
+Widgets are sandboxed, and a sandboxed process cannot send Apple Events to Music.app —
+it can't read playback state, let alone control it. Hence this shape:
 
 ```
   Music.app
-     ↑ Apple Event（读状态 / 控制播放）
-  宿主 App（菜单栏，非沙箱）
-     ↓ 写 state.json / lyrics.json / 封面
-  App Group 共享容器  ← 只有这里能穿透沙箱
-     ↓ 读
-  小组件（沙箱）
-     ↓ 按钮：把指令写回共享容器 + 发通知叫醒宿主 App
+     ↑ Apple Events (read state / control playback)
+  Host app (menu bar, non-sandboxed)
+     ↓ writes state.json / lyrics.json / artwork
+  App Group container   ← the only thing that crosses the sandbox
+     ↓ reads
+  Widget (sandboxed)
+     ↓ buttons: write command back to the container + post a notification to wake the host
 ```
 
-## 数据从哪来
+## Where the data comes from
 
-| 数据 | 来源 |
+| Data | Source |
 |---|---|
-| 播放状态、歌名、歌手、专辑、进度、喜欢 | Music.app（AppleScript） |
-| 播放控制 | Music.app（AppleScript） |
-| 封面（本地文件曲目） | Music.app，`raw data of artwork` 直接读 |
-| 封面（流媒体曲目） | iTunes Search API（Apple 官方），网易云兜底 |
-| 歌词 | 网易云 / LRCLIB |
+| Playback state, title, artist, album, progress | Music.app (AppleScript) |
+| Playback control | Music.app (AppleScript) |
+| Artwork — local files | Music.app, `raw data of artwork` |
+| Artwork — streaming tracks | iTunes Search API (Apple's own), NetEase as fallback |
+| Lyrics | NetEase Cloud Music / LRCLIB |
 
-### 歌词和流媒体封面为什么要外部来源
+### Why lyrics and streaming artwork need an outside source
 
-Apple Music 的歌词和流媒体曲目封面都是**授权内容**，Apple 不通过任何公开接口开放：
+Apple Music's lyrics and streaming-track artwork are **licensed content**, and Apple exposes
+neither through any public interface:
 
-- `lyrics` 属性在 AppleScript 字典里存在，但对流媒体曲目返回 `missing value`
-  （只有自己导入的 mp3/m4a 的 ID3 歌词标签才有值）
-- `raw data of artwork` 对流媒体曲目报 `Can't get…`，`data` 报 `Parameter error`
+- The `lyrics` property exists in Music's AppleScript dictionary but returns `missing value`
+  for streaming tracks (it only carries ID3 lyrics from files you imported yourself)
+- `raw data of artwork` fails with `Can't get…` on streaming tracks, and `data` returns
+  `Parameter error`
 
-所以只能拿 Music 给出的**歌名 + 歌手 + 时长**去公共库匹配同一首歌。
+So the only path is to take the **title + artist + duration** that Music does give us and
+match the same song against public catalogues.
 
-**匹配必须认版本，不能只看名字像不像。** 同一首歌的现场版和录音室版能差几十秒，而歌词时间戳是跟着**具体那次录音**走的，版本认错整首都对不上。所以规则是：时长差 8 秒以上直接否决；从曲名认出 live / 不插电 / 混音 / 伴奏 / 翻唱等标记，原曲和候选必须完全一致。分数不够就宁可不显示 —— 挂一整首对不上的歌词比空着更糟。
+**Matching must identify the recording, not just the name.** A live version and a studio
+version of the same song differ by tens of seconds, and lyric timestamps are tied to
+*that specific recording* — get the version wrong and the whole song is out of sync. The rules:
+a duration gap of 8s or more is an outright reject; version tags parsed from the title
+(live / acoustic / remix / instrumental / cover) must match exactly. If the score doesn't
+clear the bar, nothing is shown — a full song of wrong lyrics is worse than none.
 
-## 一些实现上的取舍
+## Notes from building this
 
-**关掉系统内容边距**（`.contentMarginsDisabled()`）。否则封面铺不到边，四周留一圈。留白改由各布局自己控制。
+The non-obvious things, kept here because they cost real time to find.
 
-**尺寸全部按容器高度取百分比，不写死点数。** 小组件的实际画布并不等于文档上的 155×155，写死点数的话留白和按钮的比例会跟着画布漂 —— 表现就是按钮贴底。
+**Widgets can't do continuous animation, but they *can* do transitions.** A widget isn't a
+continuously rendering view — it's "static snapshot + scheduled replacement", and the process
+is suspended after each frame. `.repeatForever`, `withAnimation` and `TimelineView(.animation)`
+simply don't run. But when the timeline advances, the system **does** interpolate between the
+old and new state at full frame rate. Lyric scrolling lives in that second category, which is
+why it's smooth.
 
-**背景是封面自己糊出来的。** 照 Apple Music 本体的思路：不提取主色排渐变，而是把封面复制几份各自缩放旋转叠起来，强模糊 + 过饱和。取色方案遇到灰调封面会糊成一坨脏灰，这个不会。两个细节：模糊半径按尺寸自适应（写死会把整块糊成一个平均色）；模糊前要在四周放出一圈再裁回来，否则 `blur(opaque:)` 会把内容边缘的像素往外拉，四边各留一条色带。
+**To get the scroll, every line needs a stable identity across the window.** Use the
+song-wide line number as the `ForEach` id — not the index within the visible window. When the
+window slides down by one, the lines that stay must keep the same id, otherwise the system
+can't tell "this line moved up from below" and falls back to cross-fading the whole block.
 
-**背景各层的角度是写死的常数，不跟播放进度走。** 试过让它流动，但小组件只能在时间线推进时重绘，几秒一跳的"流动"在边缘会被眼睛抓成一条抖动的竖带。
+**Font size and weight are not animatable.** Making the current line bigger via `.font()`
+produces a hard jump mid-transition — position glides while the type snaps, which reads as
+"the old line vanished and a new one appeared". Emphasis has to come from `scaleEffect` and
+`opacity`, both of which interpolate. This bites twice: size first, then weight, showing up as
+a "it gets slightly bolder half a second later" artifact.
 
-**歌词时间线整体提前 0.6 秒。** 系统在时间点到了之后重绘不是即时的，实测会晚半秒到一秒。判断"当前是第几句"时用同样的偏移，两边必须一致。
+**Size everything as a fraction of the container, never in fixed points.** The real widget
+canvas is not the documented 155×155, so hardcoded padding drifts relative to the artwork —
+the symptom is controls sitting flush against the bottom edge.
 
-**封面按专辑缓存，不按曲目。** 同一张专辑的每首歌本来就是同一张封面，按曲目存的话连着听一张专辑每换一首都要重新跑网络。哈希用固定算法而不是 `hashValue` —— 后者带随机种子，每次启动都变，缓存全废。
+**The background is the artwork blurring itself.** Following what Apple Music actually does:
+not extracting dominant colours into a gradient, but layering several scaled and rotated copies
+of the cover, then heavily blurring and oversaturating. Colour-extraction turns muddy on
+desaturated covers; this doesn't. Two details: the blur radius must scale with the container
+(a fixed radius flattens the whole thing into one average colour), and the layers need to bleed
+past the edges before blurring, or `blur(opaque:)` drags edge pixels outward and leaves a band
+along all four sides.
 
-**封面只下 300×300。** 小组件最大 155pt，@2x 屏上是 310 像素，600 的图体积是四倍，纯粹让人多等。
+**Shift the lyric timeline 0.6s early.** The system doesn't repaint exactly at the entry's
+timestamp — measured lag is half a second to a second. Apply the same offset when deciding
+which line is current; the two must agree.
 
-**按钮点下去先乐观更新。** 指令绕一圈回来约 300ms，先让界面自己变，真实状态回来后覆盖。
+**Cache artwork per album, not per track.** Every track on an album shares one cover; keying by
+track means re-fetching for every song. Use a fixed hash algorithm, not `hashValue` — that one
+is seeded randomly per launch and silently invalidates the whole cache.
 
-**指令走双通道**：分布式通知（快）+ 共享目录文件监听（保险）。沙箱会丢掉通知的 userInfo，所以指令内容始终放在文件里。
+**Fetch 300×300 artwork.** The widget is 155pt at most — 310 pixels on a 2× display. A 600px
+image is four times the bytes for zero visible gain.
 
-**署名行要从歌词里剥掉。** 网易云的 LRC 开头那几行制作人员信息**同样带时间戳**，不滤会被当成第一句歌词高亮出来。只从开头连续地剥，碰到正经歌词就停，免得误伤正文里带冒号的句子。
+**Strip credit lines from lyrics.** NetEase's LRC files open with composer/arranger credits that
+**also carry timestamps**, so they get treated as the first line of the song. Strip only
+consecutively from the top and stop at the first real lyric, or you'll catch legitimate lines
+that happen to contain a colon.
 
-**中文翻译来自网易云的 `tlyric`。** 它和原文在同一个响应里，时间戳基本对齐（偶有零点几秒出入，所以按最近的一条贴回去）。也正因为只有网易云有译文、LRCLIB 只有原文，英文歌也是先问网易云、它没有才退回 LRCLIB。有译文时**整体收小一档**（不只是原文）：英文句子长，当前句常占两行，加上译文和上下句就是五六行，
-只收原文的话还是挤。同时省掉第四句。
+**Show several lines during a long intro.** Some songs don't start singing for 25 seconds.
+Rendering a single dim line during that window looks exactly like "no lyrics found".
 
-**前奏期间要把开头几句都摆出来。** 遇上《山海》那种二十几秒前奏，只显示一句暗字看着就像没匹配到歌词。
+## Why there's no spinning vinyl
 
-## 为什么没有黑胶唱片
+It was built, then removed. Worth recording why.
 
-做过，最后删了，原因值得记下来。
+A vinyl record can't actually spin in a widget — see the animation note above. Driving it from
+the timeline means repainting every 3 seconds, which reads as stepping, not spinning.
 
-**小组件里做不出连续动画。** WidgetKit 的小组件不是持续渲染的视图，而是「静态快照 + 定时替换」—— 渲染完一帧进程就被挂起。`.repeatForever`、`withAnimation`、`TimelineView(.animation)` 统统不跑；唯一能动的 `Text(timerInterval:)` / `ProgressView(timerInterval:)` 只能驱动文字和进度条，绑不到 `rotationEffect` 上。靠时间线硬推的话每 3 秒重绘一次，唱片就是一格一格跳。
+This isn't a skill issue. The best product in that category,
+[Vinyl for Mac](https://www.vinylformac.com/), is a floating window app. The vinyl widgets on
+the App Store (MD Vinyl, VinylPod, MS Vinyl) all do their spinning **inside the app** after you
+open it — MD Vinyl, the paid category leader, has users reporting exactly that: the record spins
+in the app but not in the widget.
 
-这不是能力问题：这个品类做得最好的 [Vinyl for Mac](https://www.vinylformac.com/) 是悬浮窗 App；App Store 上那些黑胶小组件（MD Vinyl、VinylPod、MS Vinyl）的旋转全发生在**打开 App 之后**的界面里，连收费做到品类第一的 MD Vinyl 都有用户反馈「点开 App 能看到唱片转，但小组件本身不转」。
+A floating-window version was built too. `TimelineView(.animation)` genuinely gives 60fps there,
+but a window floating over the desktop tangles with icons and wallpaper — it looks cluttered,
+while widgets sit in the system's grid and stay tidy. So: back to a widget, accept no motion.
 
-中途试过改成悬浮窗，`TimelineView(.animation)` 确实能 60fps 真转，但浮在桌面上会和图标、壁纸搅在一起，显得乱、没有秩序感；小组件在系统的格子里排列，整体性好得多。于是退回小组件、接受不能动。
+And a vinyl that doesn't spin has no reason to exist at 155pt — the disc is only 92pt across,
+the centre label 34pt, too small to recognise the album, and the groove and tonearm detail is
+invisible at that size. Full-bleed artwork puts the label's own design on screen instead.
 
-而不能动的黑胶就没有存在理由了：155pt 的画布里唱片直径只剩 92pt、中心封面 34pt，认不出是哪张专辑，沟槽和唱臂的质感在这个尺寸下也看不清 —— 等于把细节全做进了一个看不见细节的画布。换成整张封面铺满，反而是把唱片公司设计好的作品完整呈现出来。
+## About Liquid Glass
 
-## 关于液态玻璃
+Can the widget be translucent glass? Yes, but the switch isn't in the code — it's in
+**System Settings → Appearance → "Icon & widget style" → Clear**. That's a global setting that
+affects every icon and widget.
 
-小组件能不能是半透明的玻璃？能，但开关不在代码里 —— 在**系统设置 → 外观 → 「图标与小组件样式」→「透明」**。那是全局设置，会一起影响所有图标和小组件。
+What the code must do is **not paint an opaque background of its own**, or it covers the glass
+the system provides. macOS 26's `glassEffect` API is not usable here: it needs to sample what's
+behind it in real time, and a widget renders offscreen with no backdrop. In practice not only
+does the glass fail to appear, the fill underneath it gets eaten too, leaving a bare icon. The
+glass look on the transport buttons is therefore hand-drawn: translucent body, light-to-dark rim
+(that rim is what sells the thickness), a highlight along the top, and an outer shadow.
 
-代码这边要配合的是：**不要画自己的不透明背景**，否则会盖掉系统给的玻璃。macOS 26 的 `glassEffect` API 在这里靠不住 —— 它要实时采样背后的画面才能折射，而小组件是离屏静态渲染的，拿不到 backdrop：实测不但玻璃没出现，连它底下的填充都被一起吃掉，按钮只剩一个裸图标。控制键的玻璃质感因此是手绘的：半透明的体积 + 上亮下暗的描边（玻璃厚度）+ 顶部反光 + 外阴影。
+## Offscreen preview tool
 
-## 调视觉用的离屏预览
-
-改样式最烦的是看不见效果 —— 得反复往桌面上加删小组件。项目里带了个预览工具，用**小组件同一份视图代码**把两个尺寸渲染成 PNG：
+Iterating on widget visuals is miserable — you have to keep adding and removing it from the
+desktop. There's a preview tool that renders both sizes to PNG using **the widget's own view code**:
 
 ```bash
 xcodebuild -project AppleMusicWidget.xcodeproj -scheme MusicWidgetPreview \
   -configuration Release -derivedDataPath build build
-./build/Build/Products/Release/MusicWidgetPreview <输出目录> [封面图路径]
+./build/Build/Products/Release/MusicWidgetPreview <output-dir> [cover-image]
 ```
 
-两个已知差异，都只影响预览、不影响真实小组件：
+Two known differences, both preview-only:
 
-- `containerBackground` 是 WidgetKit 专有的，预览里改用普通 `.background`
-- `ProgressView` / `Text` 的 `timerInterval` 版本底层是 AppKit 控件，`ImageRenderer` 渲染不出来（会画成一条黄色警示条），预览里换成自绘的静态条
+- `containerBackground` is WidgetKit-specific; the preview uses a plain `.background`
+- The `timerInterval` flavours of `ProgressView` / `Text` are AppKit-backed and
+  `ImageRenderer` can't draw them (you get a yellow warning bar) — the preview substitutes a
+  hand-drawn static bar
 
-视图靠 `familyOverride` 区分这两种场景：真实小组件不传，预览工具传。
+The view distinguishes the two via `familyOverride`: unset in the real widget, set by the tool.
 
-**调深浅两种封面很重要** —— 底部那层压暗的渐变必须在浅色封面（白字容易糊）和深色封面（容易压成一团黑）两个极端下都成立。
+**Test against both a light and a dark cover** — the bottom scrim has to hold up when white text
+sits on a pale sky and when a dark cover risks going pitch black.
 
-## 改完小组件看不到变化？
+## Widget not updating after a rebuild?
 
-`chronod`（macOS 渲染桌面小组件的进程）会缓存旧的 extension，光替换 App 不生效：
+`chronod` (the process that renders desktop widgets) caches the old extension; replacing the app
+isn't enough:
 
 ```bash
-lsregister -f "/Applications/Apple Music 小组件.app"
+lsregister -f "/Applications/Apple Music Widget.app"
 pkill -f MusicWidgetExtension
 killall chronod
 ```
 
-`lsregister` 的完整路径在
-`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`。
+`lsregister` lives in
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`.
 
-## 已知限制
+## Limitations
 
-- 后台 App 不运行时小组件不更新（会显示提示，点一下能把它拉起来）
-- 冷门歌、或者 Apple Music 独有的现场版本，可能匹配不到歌词或封面
-- 歌词有固定偏移时无法自动对齐：LRC 的时间戳是按公共曲库那版音频打的，和 Apple Music 的版本如果开头静音长度不同，会整首差一个固定值
-- 桌面被全屏窗口盖住时小组件不刷新，这是 macOS 的行为
+- The widget stops updating when the host app isn't running (it says so, and clicking it brings
+  the app back)
+- Obscure tracks, or live versions unique to Apple Music, may match no lyrics or artwork
+- A constant lyric offset can't be corrected automatically: LRC timestamps follow the public
+  catalogue's master, and if Apple Music's version has a different amount of leading silence,
+  the whole song is off by a fixed amount
+- Widgets don't refresh while the desktop is covered by a fullscreen window — that's macOS
+
+## Related projects
+
+Same itch, different shapes — all of them windows rather than widgets, which is exactly the
+point made at the top:
+
+- [Canopy](https://github.com/6gx42o/Canopy) — notch media player with synced lyrics, rendered
+  in a custom SwiftUI window
+- [LyricGlow](https://github.com/ateymoori/lyricglow) — Electron always-on-top lyric window
+- [Vinyl for Mac](https://www.vinylformac.com/) — photorealistic turntable, floating window
+- [Lyrics-Widget](https://github.com/hamedafra/Lyrics-Widget) — Notification Center widget
+
+This one is a native WidgetKit desktop widget with smooth scrolling, prioritises Chinese
+catalogues for lyrics, and carries Chinese translations for English songs.
 
 ## License
 

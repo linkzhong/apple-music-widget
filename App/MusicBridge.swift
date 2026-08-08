@@ -27,10 +27,6 @@ final class MusicBridge: @unchecked Sendable {
         if it is not running then return "NOTRUNNING"
         if player state is stopped then return "STOPPED"
         set tr to current track
-        set lovedFlag to false
-        try
-            set lovedFlag to (loved of tr)
-        end try
         set playFlag to (player state is playing)
         set artFlag to false
         try
@@ -49,7 +45,7 @@ final class MusicBridge: @unchecked Sendable {
         return (playFlag as text) & "\u{1F}" & (name of tr) & "\u{1F}" & (artist of tr) & "\u{1F}" ¬
             & (album of tr) & "\u{1F}" & (durValue as text) & "\u{1F}" ¬
             & (posValue as text) & "\u{1F}" & (persistent ID of tr) & "\u{1F}" ¬
-            & (lovedFlag as text) & "\u{1F}" & (artFlag as text)
+            & (artFlag as text)
     end tell
     """
 
@@ -74,7 +70,7 @@ final class MusicBridge: @unchecked Sendable {
         if raw == "STOPPED" { state.kind = .stopped; return state }
 
         let parts = raw.components(separatedBy: "\u{1F}")
-        guard parts.count >= 9 else { state.kind = .stopped; return state }
+        guard parts.count >= 8 else { state.kind = .stopped; return state }
 
         state.kind = (parts[0] == "true") ? .playing : .paused
         state.title = parts[1]
@@ -83,8 +79,7 @@ final class MusicBridge: @unchecked Sendable {
         state.duration = Double(parts[4]) ?? 0
         state.position = Double(parts[5]) ?? 0
         state.trackID = parts[6]
-        state.loved = (parts[7] == "true")
-        // parts[8] 是有没有封面，交给 fetchArtwork 处理
+        // parts[7] 是有没有封面，交给 fetchArtwork 处理
         // 采样时间点用「脚本返回之后」更准一点：AppleScript 往返本身有几毫秒
         state.sampledAt = Date()
         return state
@@ -139,16 +134,6 @@ final class MusicBridge: @unchecked Sendable {
                 else
                     previous track
                 end if
-            end tell
-            """)
-        case .toggleLove:
-            _ = run("""
-            tell application "Music"
-                if player state is stopped then return
-                set tr to current track
-                try
-                    set loved of tr to (not (loved of tr))
-                end try
             end tell
             """)
         case .activateMusic:

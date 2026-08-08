@@ -26,8 +26,6 @@ enum WidgetCommandSender {
             state.position = state.position(at: now)
             state.sampledAt = now
             state.kind = state.isPlaying ? .paused : .playing
-        case .toggleLove:
-            state.loved.toggle()
         default:
             return   // 上/下一首猜不出结果，老实等真实状态
         }
@@ -65,12 +63,3 @@ struct PreviousTrackIntent: AppIntent {
     }
 }
 
-struct ToggleLoveIntent: AppIntent {
-    static var title: LocalizedStringResource = "喜欢"
-    static var isDiscoverable: Bool = false
-
-    func perform() async throws -> some IntentResult {
-        WidgetCommandSender.send(.toggleLove)
-        return .result()
-    }
-}

@@ -41,7 +41,6 @@ struct PlayerState: Codable, Equatable {
     var artworkFile: String?
     /// 从封面里取的主色 [r, g, b]，给小组件当背景氛围色
     var artworkColor: [Double]?
-    var loved: Bool = false
 
     var isPlaying: Bool { kind == .playing }
     var hasTrack: Bool { kind == .playing || kind == .paused }
@@ -106,7 +105,6 @@ enum MusicCommand: String, Codable, CaseIterable {
     case playPause
     case next
     case previous
-    case toggleLove
     /// 打开 Music.app 并前置
     case activateMusic
 }

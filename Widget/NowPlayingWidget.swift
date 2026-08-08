@@ -132,89 +132,112 @@ struct NowPlayingWidgetView: View {
         GeometryReader { geo in
             let u = geo.size.height        // 同样按容器取比例，不写死点数
 
-            VStack(spacing: 0) {
-                if entry.hasLyrics, let current = entry.currentInWindow {
-                    let translation = entry.currentTranslation
-                    // 带译文时整体收小一档：英文句子长，当前句常占两行，
-                    // 再加上译文和上下句就是五六行，不收就挤成一团
-                    let compact = translation != nil
-                    let sideSize = u * (compact ? 0.082 : 0.095)
-                    let gap = u * (compact ? 0.034 : 0.042)
-
-                    if let above = line(at: current - 1) {
-                        lyricLine(above, size: sideSize, opacity: 0.32)
-                            .padding(.bottom, gap)
-                    }
-
-                    Text(line(at: current) ?? "")
-                        .font(.system(size: u * (compact ? 0.112 : 0.145), weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.5)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity)
-                        // 换句时让系统做个淡入淡出，别硬切
-                        .id(current)
-                        .transition(.opacity)
-
-                    if let translation {
-                        Text(translation)
-                            .font(.system(size: u * 0.079, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.55)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, u * 0.02)
-                    }
-
-                    if let next1 = line(at: current + 1) {
-                        lyricLine(next1, size: sideSize, opacity: 0.36)
-                            .padding(.top, gap)
-                    }
-                    // 译文占掉一行，再摆第四句就挤了
-                    if !compact, let next2 = line(at: current + 2) {
-                        lyricLine(next2, size: u * 0.095, opacity: 0.22)
-                            .padding(.top, u * 0.03)
-                    }
-                } else if entry.hasLyrics {
-                    // 前奏，还没唱到第一句。
-                    // 这里要把开头几句都摆出来 —— 只显示一句暗字的话，
-                    // 遇上《山海》那种二十几秒的前奏，看着就像没匹配到歌词。
-                    ForEach(Array(entry.lyricWindow.prefix(3).enumerated()), id: \.offset) { i, text in
-                        lyricLine(text, size: u * 0.095, opacity: i == 0 ? 0.44 : 0.24)
-                            .padding(.top, i == 0 ? 0 : u * 0.04)
-                    }
+            Group {
+                if entry.hasLyrics {
+                    scrollingLyrics(unit: u, width: geo.size.width)
                 } else {
-                    Text(entry.lyricsMissing ? "没找到这首的歌词" : "正在查找歌词…")
-                        .font(.system(size: u * 0.09))
-                        .foregroundStyle(.white.opacity(0.35))
-                    Text(state.title)
-                        .font(.system(size: u * 0.078))
-                        .foregroundStyle(.white.opacity(0.22))
-                        .lineLimit(1)
-                        .padding(.top, u * 0.026)
+                    VStack(spacing: 0) {
+                        Text(entry.lyricsMissing ? "没找到这首的歌词" : "正在查找歌词…")
+                            .font(.system(size: u * 0.09))
+                            .foregroundStyle(.white.opacity(0.35))
+                        Text(state.title)
+                            .font(.system(size: u * 0.078))
+                            .foregroundStyle(.white.opacity(0.22))
+                            .lineLimit(1)
+                            .padding(.top, u * 0.026)
+                    }
                 }
             }
-            // 四边留一样的边距，整块在正中间
-            .padding(u * 0.1)
             .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 
-    private func lyricLine(_ text: String, size: CGFloat, opacity: Double) -> some View {
-        Text(text)
-            .font(.system(size: size, weight: .medium))
-            .foregroundStyle(.white.opacity(opacity))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
+    /// 会滚动的歌词。
+    ///
+    /// 每一行都常驻在 ZStack 里，位置用 offset 表达 —— 当前行永远在 y=0，
+    /// 其余按行距上下排开。换句时只有 `current` 变了，于是所有行的 offset、
+    /// 字号、透明度一起变，系统在时间线切换的瞬间把这些变化补成动画，
+    /// 看到的就是整块歌词平滑上滚。
+    ///
+    /// 关键是 **id 必须用全曲行号**（`windowStart + i`）：窗口往下滑一格时，
+    /// 同一句歌词的身份不能变，否则系统认不出"这句从下面移上来了"，
+    /// 只会把整块内容淡入淡出掉。
+    private func scrollingLyrics(unit u: CGFloat, width: CGFloat) -> some View {
+        let current = entry.currentInWindow ?? 0
+        let started = entry.currentInWindow != nil
+        let hasTranslation = entry.currentTranslation != nil
+        // 译文自己占一行，下面就少铺一句
+        let below = hasTranslation ? 1 : 2
+        let lower = max(0, current - 1)
+        let upper = min(entry.lyricWindow.count - 1, current + below)
+        // 用 VStack 让高度自己排 —— 当前句可能占两行，固定槽位会压到上一句头上
+        let rows = (lower...max(lower, upper)).map {
+            (id: entry.windowStart + $0, distance: $0 - current, text: entry.lyricWindow[$0])
+        }
+
+        // 所有行共用一个基础字号，主次靠缩放区分。
+        // 不能用 .font() 的大小差别 —— **字号不是可动画属性**，SwiftUI 不会补间，
+        // 那句从下面推上来时位置在平滑移动、字号却「啪」地跳一下，
+        // 看着就像旧的消失、新的凭空出现。scaleEffect 才补得出「边推边长大」。
+        let baseSize = u * (hasTranslation ? 0.138 : 0.145)
+        let shrink = 0.66
+
+        return VStack(spacing: u * (hasTranslation ? 0.03 : 0.036)) {
+            ForEach(rows, id: \.id) { row in
+                let isCurrent = started && row.distance == 0
+
+                VStack(spacing: u * 0.022) {
+                    Text(row.text)
+                        // 所有行共用一个字重。weight 和 size 一样不可动画，
+                        // 当前句切过来时它补不出过渡，会在动画跑完那一刻硬粗一下。
+                        // 主次已经由缩放和不透明度表达，不差这一档。
+                        .font(.system(size: baseSize, weight: .semibold))
+                        .foregroundStyle(.white.opacity(opacity(forDistance: row.distance, started: started)))
+                        .lineLimit(isCurrent ? 2 : 1)
+                        .minimumScaleFactor(0.5)
+                        .truncationMode(.tail)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if isCurrent, let translation = entry.currentTranslation {
+                        Text(translation)
+                            .font(.system(size: baseSize * 0.68, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .scaleEffect(isCurrent ? 1 : shrink, anchor: .center)
+                // 缩放不改变布局占位，多出来的空隙用负 padding 收回来
+                .padding(.vertical, isCurrent ? 0 : -baseSize * (1 - shrink) * 0.62)
+                .frame(maxWidth: .infinity)
+                // 只有真正新进/移出窗口的那句才走 transition，
+                // 留在窗口里的靠上面的位移和缩放动画
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .offset(y: u * 0.14)),
+                    removal: .opacity.combined(with: .offset(y: -u * 0.14))
+                ))
+            }
+        }
+        .padding(.horizontal, u * 0.08)
+        .frame(width: width, height: u, alignment: .center)
+        .clipped()
+        // 时间线推进导致 current 变化时，让系统把这些变化补成动画。
+        // 靠的是上面 ForEach 用全曲行号当 id：窗口滑动时留下来的那几句身份不变，
+        // 系统才认得出"这句从下面移上来了"，而不是把整块重画一遍。
+        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: entry.windowStart + current)
     }
 
-    private func line(at index: Int) -> String? {
-        entry.lyricWindow.indices.contains(index) ? entry.lyricWindow[index] : nil
+    /// 离当前句越远越淡；还没开唱时整体压暗，只把第一句提亮一点
+    private func opacity(forDistance distance: Int, started: Bool) -> Double {
+        guard started else { return distance == 0 ? 0.44 : 0.2 }
+        switch abs(distance) {
+        case 0: return 1
+        case 1: return 0.36
+        case 2: return 0.2
+        default: return 0.1
+        }
     }
 
     // MARK: - 封面与背景

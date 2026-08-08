@@ -10,13 +10,16 @@ struct MusicEntry: TimelineEntry {
     var lyricWindow: [String] = []
     /// 窗口里哪一行是当前行
     var currentInWindow: Int?
+    /// 窗口第一行在整首歌里的行号。
+    /// 靠它给每一行算出**稳定的身份** —— 窗口往下滑时，同一句歌词的 id 不变，
+    /// 系统才会把它的位移补成动画（丝滑上滚）；用窗口内下标当 id 的话身份会错位，
+    /// 只能得到整块淡入淡出。
+    var windowStart: Int = 0
     /// 当前这句的中文译文（英文歌才有）
     var currentTranslation: String?
     /// 查过了但确实没有歌词
     var lyricsMissing = false
 
-    /// 黑胶此刻转到的角度
-    var angle: Double = 0
     /// 宿主 App 还活着吗
     var hostAlive = true
     /// 封面图的完整路径。放在 entry 里而不是让视图去查 App Group，
@@ -30,12 +33,8 @@ struct MusicProvider: TimelineProvider {
 
     /// 大尺寸一屏放得下的歌词行数
     private let windowSize = 7
-    /// 唱片每秒转多少度。
-    /// 小组件只能在时间线推进时重绘，转得越快每格跳的角度越大，看着就是一卡一卡的。
-    /// 压到这个速度后每格约 10°，观感是「缓慢地转」而不是「跳一格」。
-    private let degreesPerSecond = 3.5
-    /// 背景色场推进用的时间刻度
-    private let tickInterval = 3.0
+    /// 没有歌词时的兜底刷新间隔 —— 有歌词的话每句本身就是一个时间点，够密了
+    private let tickInterval = 12.0
     private let maxEntries = 90
 
     /// 歌词的提前量。
@@ -62,7 +61,7 @@ struct MusicProvider: TimelineProvider {
         var entries = [entry(at: now, state: state, lyrics: lyrics, alive: alive)]
 
         if state.isPlaying, alive {
-            // 两组时间点合到一起：每句歌词的起点（换行）+ 固定刻度（推进背景色场）
+            // 两组时间点合到一起：每句歌词的起点（换行）+ 稀疏的兜底刻度
             let trackStart = state.trackStartDate
             var moments: [Date] = lyrics.lines.map {
                 trackStart.addingTimeInterval($0.time - lyricsLead)
@@ -95,7 +94,6 @@ struct MusicProvider: TimelineProvider {
         var result = MusicEntry(date: date, state: state)
         result.hostAlive = alive
         result.lyricsMissing = lyrics.missing
-        result.angle = position * degreesPerSecond
         result.artworkPath = state.artworkFile.flatMap { SharedStore.artworkPath($0)?.path }
 
         guard !lyrics.isEmpty else { return result }
@@ -111,6 +109,7 @@ struct MusicProvider: TimelineProvider {
 
         result.lyricWindow = range.map { lyrics.lines[$0].text }
         result.currentInWindow = current.map { $0 - start }
+        result.windowStart = start
         if let current { result.currentTranslation = lyrics.lines[current].translation }
         return result
     }
@@ -152,7 +151,6 @@ extension PlayerState {
         s.position = 43
         s.sampledAt = Date()
         s.trackID = "sample"
-        s.loved = true
         s.artworkColor = [0.72, 0.28, 0.34]
         return s
     }

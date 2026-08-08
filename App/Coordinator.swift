@@ -91,7 +91,6 @@ final class Coordinator: ObservableObject {
         let significant = force
             || trackChanged
             || next.kind != state.kind
-            || next.loved != state.loved
             || abs(next.position(at: next.sampledAt) - state.position(at: next.sampledAt)) > 1.5
 
         state = next
