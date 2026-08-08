@@ -10,12 +10,12 @@ enum LyricsService {
     static func fetch(title: String, artist: String, album: String, duration: Double) async -> Lyrics? {
         guard !title.isEmpty else { return nil }
 
-        // 中文歌网易云的库全得多，英文歌 LRCLIB 更全，按曲目本身决定先问谁。
-        let chinesePreferred = title.containsCJK || artist.containsCJK
-
-        let providers: [() async -> Lyrics?] = chinesePreferred
-            ? [{ await netease(title, artist, duration) }, { await lrclib(title, artist, album, duration) }]
-            : [{ await lrclib(title, artist, album, duration) }, { await netease(title, artist, duration) }]
+        // 一律先问网易云：中文曲库本来就它最全，而英文歌它还带官方中文译文 ——
+        // LRCLIB 只有原文。网易云没有的再退回 LRCLIB。
+        let providers: [() async -> Lyrics?] = [
+            { await netease(title, artist, duration) },
+            { await lrclib(title, artist, album, duration) },
+        ]
 
         for provider in providers {
             if let result = await provider(), !result.isEmpty {
@@ -130,8 +130,14 @@ enum LyricsService {
         guard let lyricObj = try? JSONSerialization.jsonObject(with: lyricData) as? [String: Any],
               let lrc = (lyricObj["lrc"] as? [String: Any])?["lyric"] as? String else { return nil }
 
-        let lines = parseLRC(lrc)
-        return lines.isEmpty ? nil : Lyrics(lines: lines, source: "网易云")
+        var lines = parseLRC(lrc)
+        guard !lines.isEmpty else { return nil }
+
+        // 同一个响应里就带着官方中文译文，顺手贴上
+        if let tlyric = (lyricObj["tlyric"] as? [String: Any])?["lyric"] as? String, !tlyric.isEmpty {
+            lines = attach(translation: parseLRC(tlyric), to: lines)
+        }
+        return Lyrics(lines: lines, source: "网易云")
     }
 
     // MARK: - LRC 解析
@@ -173,6 +179,21 @@ enum LyricsService {
             lines.removeFirst()
         }
         return lines
+    }
+
+    /// 把译文按时间戳贴回原文行。
+    /// 网易云的 tlyric 和原文时间戳基本对齐，偶尔有零点几秒出入，所以取最近的一条。
+    private static func attach(translation: [LyricLine], to lines: [LyricLine]) -> [LyricLine] {
+        guard !translation.isEmpty else { return lines }
+        var result = lines
+        for i in result.indices {
+            let t = result[i].time
+            guard let match = translation.min(by: { abs($0.time - t) < abs($1.time - t) }),
+                  abs(match.time - t) < 0.6,
+                  !match.text.isEmpty else { continue }
+            result[i].translation = match.text
+        }
+        return result
     }
 
     /// 网易云的 LRC 开头会带一串制作人员署名，而且**同样带时间戳**，

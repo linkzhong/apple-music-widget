@@ -140,8 +140,10 @@ struct NowPlayingWidgetView: View {
                             .padding(.bottom, u * 0.042)
                     }
 
+                    // 有译文时原文让出一点字号，给下面那行中文腾地方
+                    let translation = entry.currentTranslation
                     Text(line(at: current) ?? "")
-                        .font(.system(size: u * 0.145, weight: .bold))
+                        .font(.system(size: u * (translation == nil ? 0.145 : 0.126), weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
@@ -152,11 +154,23 @@ struct NowPlayingWidgetView: View {
                         .id(current)
                         .transition(.opacity)
 
+                    if let translation {
+                        Text(translation)
+                            .font(.system(size: u * 0.088, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, u * 0.024)
+                    }
+
                     if let next1 = line(at: current + 1) {
                         lyricLine(next1, size: u * 0.095, opacity: 0.36)
                             .padding(.top, u * 0.042)
                     }
-                    if let next2 = line(at: current + 2) {
+                    // 译文占掉一行，再摆第四句就挤了
+                    if translation == nil, let next2 = line(at: current + 2) {
                         lyricLine(next2, size: u * 0.095, opacity: 0.22)
                             .padding(.top, u * 0.03)
                     }

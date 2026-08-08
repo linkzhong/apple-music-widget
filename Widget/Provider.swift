@@ -10,6 +10,8 @@ struct MusicEntry: TimelineEntry {
     var lyricWindow: [String] = []
     /// 窗口里哪一行是当前行
     var currentInWindow: Int?
+    /// 当前这句的中文译文（英文歌才有）
+    var currentTranslation: String?
     /// 查过了但确实没有歌词
     var lyricsMissing = false
 
@@ -109,6 +111,7 @@ struct MusicProvider: TimelineProvider {
 
         result.lyricWindow = range.map { lyrics.lines[$0].text }
         result.currentInWindow = current.map { $0 - start }
+        if let current { result.currentTranslation = lyrics.lines[current].translation }
         return result
     }
 
@@ -160,7 +163,8 @@ extension Lyrics {
         Lyrics(trackID: "sample", lines: [
             LyricLine(time: 34, text: "我用电联车的速度搭自强号"),
             LyricLine(time: 38, text: "乘客的声音是强暴"),
-            LyricLine(time: 42, text: "我用一个世纪的时间搭电梯"),
+            LyricLine(time: 42, text: "I heard that you're settled down",
+                      translation: "听说你心有所属"),
             LyricLine(time: 46, text: "手贴着大腿那是我世界的面积"),
             LyricLine(time: 50, text: "我在后座有她的机车被吐出排气管"),
         ], source: "网易云")

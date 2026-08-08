@@ -67,6 +67,8 @@ struct PlayerState: Codable, Equatable {
 struct LyricLine: Codable, Equatable {
     var time: Double   // 秒
     var text: String
+    /// 中文翻译。网易云对多数英文歌有官方译文，时间戳和原文对齐。
+    var translation: String?
 }
 
 struct Lyrics: Codable, Equatable {

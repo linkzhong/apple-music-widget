@@ -35,6 +35,7 @@ func makeEntry(at seconds: Double) -> MusicEntry {
     let range = start..<min(lyrics.lines.count, start + 7)
     entry.lyricWindow = range.map { lyrics.lines[$0].text }
     entry.currentInWindow = current.map { $0 - start }
+    if let current { entry.currentTranslation = lyrics.lines[current].translation }
     return entry
 }
 
