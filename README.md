@@ -6,6 +6,8 @@ Apple ships a Podcasts widget on macOS but never made one for Music. This fills 
 and is **the first to make lyrics scroll smoothly inside a real WidgetKit widget**, something
 widgets are widely believed to be incapable of.
 
+<img src="docs/demo.gif" width="820">
+
 | | |
 |:--|:--|
 | <img src="docs/preview_small.png" width="300"> | <img src="docs/preview_medium.png" width="620"> |

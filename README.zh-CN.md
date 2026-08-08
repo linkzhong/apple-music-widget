@@ -5,6 +5,8 @@
 Apple 在 macOS 上给 Podcast 做了小组件，却没给「音乐」做。这个项目补上 ——
 并且是**第一个在真正的 WidgetKit 小组件里做出丝滑滚动歌词的**，而这件事被普遍认为小组件做不到。
 
+<img src="docs/demo.gif" width="820">
+
 | | |
 |:--|:--|
 | <img src="docs/preview_small.png" width="300"> | <img src="docs/preview_medium.png" width="620"> |
