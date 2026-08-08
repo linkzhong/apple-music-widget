@@ -1,0 +1,16 @@
+# xcodegen 从 project.yml 生成，不入库
+*.xcodeproj/
+
+# 构建产物
+build/
+DerivedData/
+*.app
+*.dSYM
+
+# macOS
+.DS_Store
+
+# Xcode 用户态
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint

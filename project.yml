@@ -1,0 +1,76 @@
+name: AppleMusicWidget
+options:
+  bundleIdPrefix: com.xiaoxiang
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: T4GCDZULTU
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Developer ID Application"
+    ENABLE_HARDENED_RUNTIME: YES
+    # 不注入 get-task-allow —— 这是调试用的，正式产物里不该带
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_EMIT_LOC_STRINGS: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    GENERATE_INFOPLIST_FILE: NO
+    ALWAYS_SEARCH_USER_PATHS: NO
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  MusicWidgetHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+      - path: Shared
+    dependencies:
+      - target: MusicWidgetExtension
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_NAME: MusicWidgetHost
+        PRODUCT_BUNDLE_IDENTIFIER: com.xiaoxiang.musicwidget
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+
+  # 离屏预览：用小组件同一份视图代码渲染 PNG，调视觉时不用反复动桌面
+  MusicWidgetPreview:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Preview
+      - path: Shared
+      - path: Widget
+        excludes:
+          - MusicWidgetBundle.swift   # 那个 @main 会和预览工具自己的入口打架
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xiaoxiang.musicwidget.preview
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_ENTITLEMENTS: ""
+        ENABLE_HARDENED_RUNTIME: NO
+
+  MusicWidgetExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Widget
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_NAME: MusicWidgetExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.xiaoxiang.musicwidget.widget
+        INFOPLIST_FILE: Widget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Widget/Widget.entitlements
+        SKIP_INSTALL: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../../../../Frameworks"
