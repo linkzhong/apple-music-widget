@@ -3,7 +3,7 @@
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 Apple 在 macOS 上给 Podcast 做了小组件，却没给「音乐」做。这个项目补上 ——
-而且做成了一件普遍认为小组件做不到的事：**在真正的 WidgetKit 小组件里，让歌词丝滑滚动。**
+并且是**第一个在真正的 WidgetKit 小组件里做出丝滑滚动歌词的**，而这件事被普遍认为小组件做不到。
 
 | | |
 |:--|:--|
@@ -20,11 +20,19 @@ Apple 在 macOS 上给 Podcast 做了小组件，却没给「音乐」做。这�
 
 ### 关于那个滚动
 
-据我们所知，**在 WidgetKit 小组件里**做到这件事的还没有别人。不是因为没人想要，而是因为
-「小组件不能做动画」是公认常识，所以想要动效的人干脆都去做窗口了 ——
-[Canopy](https://github.com/6gx42o/Canopy) 的歌词渲染在自绘的 SwiftUI 窗口里，
-[LyricGlow](https://github.com/ateymoori/lyricglow) 是 Electron 置顶窗，
-[Vinyl for Mac](https://www.vinylformac.com/) 是悬浮窗。这个项目也走过那条路，又走了回来。
+在 macOS 上做同步歌词的项目不少。我们能找到的每一个，都把它渲染在**窗口**里，而不是小组件里：
+
+| 项目 | 形态 | 滚动发生在哪 |
+|---|---|---|
+| [Canopy](https://github.com/6gx42o/Canopy) | 刘海播放器 | 自绘的 SwiftUI 窗口 |
+| [LyricGlow](https://github.com/ateymoori/lyricglow) | Electron | 置顶窗口 |
+| [Vinyl for Mac](https://www.vinylformac.com/) | 悬浮唱机 | 窗口 |
+| [Lyrics-Widget](https://github.com/hamedafra/Lyrics-Widget) | 通知中心 | 旧式 widget |
+
+这不是巧合。「小组件不能做动画」是公认常识，所以想要动效的人干脆都去做窗口了 ——
+这个项目也走过那条路，又走了回来。
+
+（如果你知道有哪个 WidgetKit 小组件做到了这件事，欢迎开 issue，这个说法会被更正。）
 
 那条常识只对了一半。小组件确实跑不了**持续**动画 —— 每渲染完一帧进程就被挂起。但当时间线
 推进时，系统**会**在新旧状态之间做满帧率的插值。歌词换行天然每句都有一个触发点，正好落在

@@ -3,8 +3,8 @@
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 Apple ships a Podcasts widget on macOS but never made one for Music. This fills the gap —
-and does something people generally believe widgets can't: **lyrics that scroll smoothly,
-inside a real WidgetKit widget.**
+and is **the first to make lyrics scroll smoothly inside a real WidgetKit widget**, something
+widgets are widely believed to be incapable of.
 
 | | |
 |:--|:--|
@@ -22,12 +22,20 @@ inside a real WidgetKit widget.**
 
 ### On the scrolling
 
-As far as we can tell, no other project does this **inside a WidgetKit widget**. Not because
-it's hard to want — because the received wisdom is that widgets can't animate, so everyone who
-wanted motion built a window instead. [Canopy](https://github.com/6gx42o/Canopy) renders its
-lyrics in a custom SwiftUI window, [LyricGlow](https://github.com/ateymoori/lyricglow) is an
-Electron always-on-top window, [Vinyl for Mac](https://www.vinylformac.com/) is a floating
-window. This project went down that road too, and came back.
+Plenty of projects show synced lyrics on macOS. Every one we could find renders them **in a
+window**, not in a widget:
+
+| Project | Form | Where the scrolling happens |
+|---|---|---|
+| [Canopy](https://github.com/6gx42o/Canopy) | notch media player | custom SwiftUI window |
+| [LyricGlow](https://github.com/ateymoori/lyricglow) | Electron | always-on-top window |
+| [Vinyl for Mac](https://www.vinylformac.com/) | floating turntable | window |
+| [Lyrics-Widget](https://github.com/hamedafra/Lyrics-Widget) | Notification Center | legacy widget |
+
+That's not a coincidence. The received wisdom is that widgets can't animate, so everyone who
+wanted motion built a window instead — this project went down that road too, and came back.
+
+(If you know of a WidgetKit widget that does this, open an issue and the claim gets corrected.)
 
 The received wisdom is half right. Widgets genuinely cannot run *continuous* animation — the
 process is suspended after each frame. But when the timeline advances, the system **does**
