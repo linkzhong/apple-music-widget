@@ -163,8 +163,8 @@ extension Lyrics {
         Lyrics(trackID: "sample", lines: [
             LyricLine(time: 34, text: "我用电联车的速度搭自强号"),
             LyricLine(time: 38, text: "乘客的声音是强暴"),
-            LyricLine(time: 42, text: "I heard that you're settled down",
-                      translation: "听说你心有所属"),
+            LyricLine(time: 42, text: "I heard that you're settled down, that you found a girl",
+                      translation: "听说你已安定下来 已经找到了心仪的姑娘"),
             LyricLine(time: 46, text: "手贴着大腿那是我世界的面积"),
             LyricLine(time: 50, text: "我在后座有她的机车被吐出排气管"),
         ], source: "网易云")

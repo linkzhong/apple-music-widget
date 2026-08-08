@@ -134,16 +134,20 @@ struct NowPlayingWidgetView: View {
 
             VStack(spacing: 0) {
                 if entry.hasLyrics, let current = entry.currentInWindow {
-                    // 上一句 + 当前句（放大）+ 未来两句
+                    let translation = entry.currentTranslation
+                    // 带译文时整体收小一档：英文句子长，当前句常占两行，
+                    // 再加上译文和上下句就是五六行，不收就挤成一团
+                    let compact = translation != nil
+                    let sideSize = u * (compact ? 0.082 : 0.095)
+                    let gap = u * (compact ? 0.034 : 0.042)
+
                     if let above = line(at: current - 1) {
-                        lyricLine(above, size: u * 0.095, opacity: 0.32)
-                            .padding(.bottom, u * 0.042)
+                        lyricLine(above, size: sideSize, opacity: 0.32)
+                            .padding(.bottom, gap)
                     }
 
-                    // 有译文时原文让出一点字号，给下面那行中文腾地方
-                    let translation = entry.currentTranslation
                     Text(line(at: current) ?? "")
-                        .font(.system(size: u * (translation == nil ? 0.145 : 0.126), weight: .bold))
+                        .font(.system(size: u * (compact ? 0.112 : 0.145), weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
@@ -156,21 +160,21 @@ struct NowPlayingWidgetView: View {
 
                     if let translation {
                         Text(translation)
-                            .font(.system(size: u * 0.088, weight: .medium))
+                            .font(.system(size: u * 0.079, weight: .medium))
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.6)
+                            .minimumScaleFactor(0.55)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
-                            .padding(.top, u * 0.024)
+                            .padding(.top, u * 0.02)
                     }
 
                     if let next1 = line(at: current + 1) {
-                        lyricLine(next1, size: u * 0.095, opacity: 0.36)
-                            .padding(.top, u * 0.042)
+                        lyricLine(next1, size: sideSize, opacity: 0.36)
+                            .padding(.top, gap)
                     }
                     // 译文占掉一行，再摆第四句就挤了
-                    if translation == nil, let next2 = line(at: current + 2) {
+                    if !compact, let next2 = line(at: current + 2) {
                         lyricLine(next2, size: u * 0.095, opacity: 0.22)
                             .padding(.top, u * 0.03)
                     }
