@@ -300,10 +300,35 @@ final class Coordinator: ObservableObject {
     }
 
     private var lastReload = Date.distantPast
+    private var pendingReload: Task<Void, Never>?
+    private let reloadInterval: TimeInterval = 0.4
+
+    /// 通知小组件重绘。太密的话**延后合并**，绝不能直接丢弃。
+    ///
+    /// 丢弃过一次，代价是这样的：换歌时刷新会连着触发好几轮（状态变了一次、
+    /// 封面到了一次），而歌词往往是最后才到的那个，正好撞进节流窗口被丢掉 ——
+    /// 于是歌词明明已经写进共享容器，小组件却从没被叫醒去读它，界面一直停在
+    /// 「正在查找歌词…」。直到下次换歌才闪现一帧，随即被新歌覆盖。
     func reloadWidgets() {
-        // 从宿主 App 主动触发的刷新不占系统预算，但也别刷得太密
-        guard Date().timeIntervalSince(lastReload) > 0.4 else { return }
-        lastReload = Date()
-        WidgetCenter.shared.reloadTimelines(ofKind: Shared.widgetKind)
+        let gap = Date().timeIntervalSince(lastReload)
+        if gap >= reloadInterval {
+            pendingReload?.cancel()
+            pendingReload = nil
+            lastReload = Date()
+            WidgetCenter.shared.reloadTimelines(ofKind: Shared.widgetKind)
+            return
+        }
+        // 已经排了一次就不用再排，反正合并成同一次
+        guard pendingReload == nil else { return }
+        pendingReload = Task { [weak self] in
+            guard let self else { return }
+            let wait = self.reloadInterval - gap + 0.05
+            try? await Task.sleep(nanoseconds: UInt64(max(wait, 0.05) * 1_000_000_000))
+            await MainActor.run {
+                self.pendingReload = nil
+                self.lastReload = Date()
+                WidgetCenter.shared.reloadTimelines(ofKind: Shared.widgetKind)
+            }
+        }
     }
 }
