@@ -65,6 +65,15 @@ struct NowPlayingWidgetView: View {
     private var coverSmall: some View {
         GeometryReader { geo in
             let u = geo.size.height        // 基准单位
+            // 底部这一组用**绝对点数**，不跟容器比例走。
+            // 比例值的问题是画布一变，按钮离底边的距离就跟着变 —— 换外接屏、
+            // 系统更新、小组件换个位置摆，都会让它上下漂，而人眼对「按钮离底多远」
+            // 极其敏感。这里锁死 16pt；只有画布小到离谱时才按比例退让。
+            let pad = min(16, u * 0.14)
+            let bigKey = min(40, u * 0.30)
+            let sideKey = min(31, u * 0.23)
+            let keyGap = min(11, u * 0.09)
+            let titleSize = min(16, u * 0.12)
 
             ZStack(alignment: .bottom) {
                 Group {
@@ -94,34 +103,33 @@ struct NowPlayingWidgetView: View {
                 startPoint: .top, endPoint: .bottom
             )
 
-                VStack(spacing: u * 0.055) {
+                VStack(spacing: 9) {
                     Text(state.title)
-                        .font(.system(size: u * 0.098, weight: .semibold))
+                        .font(.system(size: titleSize, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .multilineTextAlignment(.center)
-                        .shadow(color: .black.opacity(0.55), radius: u * 0.02, y: u * 0.007)
+                        .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
                         .frame(maxWidth: .infinity)
-                    controlRow(unit: u)
+                    controlRow(big: bigKey, side: sideKey, gap: keyGap)
                 }
-                .padding(.horizontal, u * 0.07)
-                // 底部留白约等于 2/3 个「下一首」键 —— 再多按钮就显得往上飘了
-                .padding(.bottom, u * 0.13)
+                .padding(.horizontal, 11)
+                .padding(.bottom, pad)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 
-    private func controlRow(unit u: CGFloat) -> some View {
-        HStack(spacing: u * 0.07) {
+    private func controlRow(big: CGFloat, side: CGFloat, gap: CGFloat) -> some View {
+        HStack(spacing: gap) {
             ControlButton(intent: PreviousTrackIntent(), symbol: "backward.fill",
-                          diameter: u * 0.19, glyph: u * 0.079)
+                          diameter: side, glyph: side * 0.41)
             ControlButton(intent: PlayPauseIntent(),
                           symbol: state.isPlaying ? "pause.fill" : "play.fill",
-                          diameter: u * 0.245, glyph: u * 0.105, prominent: true)
+                          diameter: big, glyph: big * 0.43, prominent: true)
             ControlButton(intent: NextTrackIntent(), symbol: "forward.fill",
-                          diameter: u * 0.19, glyph: u * 0.079)
+                          diameter: side, glyph: side * 0.41)
         }
         .frame(maxWidth: .infinity)
     }

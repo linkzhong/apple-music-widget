@@ -5,23 +5,38 @@ import Foundation
 /// Apple Music 流媒体曲目的歌词属于授权内容，AppleScript 的 `lyrics` 字段永远是空的
 /// （实测返回 missing value），MusicKit 也不开放。所以只能拿 Music.app 给出的
 /// 「歌名 + 歌手 + 时长」去公共歌词库里匹配同一首歌。
+/// 网易云请求的排队器。
+///
+/// 它的限流表现很有迷惑性：超了不是报错，而是安静地返回空结果，
+/// 和「查无此歌」完全一样。所以宁可慢一点也要隔开。
+private actor NeteaseThrottle {
+    static let shared = NeteaseThrottle()
+    private var lastRequest = Date.distantPast
+    private let minInterval: TimeInterval = 3
+
+    func wait() async {
+        let gap = Date().timeIntervalSince(lastRequest)
+        if gap < minInterval {
+            try? await Task.sleep(nanoseconds: UInt64((minInterval - gap) * 1_000_000_000))
+        }
+        lastRequest = Date()
+    }
+}
+
 enum LyricsService {
 
     static func fetch(title: String, artist: String, album: String, duration: Double) async -> Lyrics? {
         guard !title.isEmpty else { return nil }
 
-        // 一律先问网易云：中文曲库本来就它最全，而英文歌它还带官方中文译文 ——
-        // LRCLIB 只有原文。网易云没有的再退回 LRCLIB。
-        let providers: [() async -> Lyrics?] = [
-            { await netease(title, artist, duration) },
-            { await lrclib(title, artist, album, duration) },
-        ]
+        // 两个源同时问，不串行等。
+        // 优先用网易云的结果：中文曲库它最全，而且英文歌还带官方中文译文，LRCLIB 只有原文。
+        // 但请求是并发的 —— 网易云要是抖了一下，LRCLIB 的结果已经在手边，
+        // 不用再等一轮超时。歌词查不到的抱怨里，相当一部分是这种一次性失败。
+        async let primary = netease(title, artist, duration)
+        async let secondary = lrclib(title, artist, album, duration)
 
-        for provider in providers {
-            if let result = await provider(), !result.isEmpty {
-                return result
-            }
-        }
+        if let result = await primary, !result.isEmpty { return result }
+        if let result = await secondary, !result.isEmpty { return result }
         return nil
     }
 
@@ -55,7 +70,8 @@ enum LyricsService {
                 candidateTitle: item["trackName"] as? String ?? "",
                 candidateArtists: [item["artistName"] as? String ?? ""],
                 candidateDuration: item["duration"] as? Double ?? 0,
-                title: title, artist: artist, duration: duration
+                title: title, artist: artist, duration: duration,
+                artistPreFiltered: true
             )
             return (score, synced)
         }
@@ -75,7 +91,8 @@ enum LyricsService {
             candidateTitle: obj["trackName"] as? String ?? title,
             candidateArtists: [obj["artistName"] as? String ?? artist],
             candidateDuration: obj["duration"] as? Double ?? duration,
-            title: title, artist: artist, duration: duration
+            title: title, artist: artist, duration: duration,
+            artistPreFiltered: true
         )
         guard score >= matchThreshold else { return nil }
         let lines = parseLRC(synced)
@@ -85,6 +102,11 @@ enum LyricsService {
     // MARK: - 网易云（中文曲库）
 
     private static func netease(_ title: String, _ artist: String, _ duration: Double) async -> Lyrics? {
+        // 网易云这个 web 接口限流很凶：实测连着请求，第二次开始就返回**空结果**
+        // 而不是报错 —— 表现和「这首歌不存在」一模一样。换歌快一点就会成片地
+        // 「没有歌词」。所以进门先排队。
+        await NeteaseThrottle.shared.wait()
+
         let headers = [
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
             "Referer": "https://music.163.com",
@@ -237,9 +259,14 @@ enum LyricsService {
     }
 
     /// 判断候选和当前曲目是不是同一个录音。够分才认，否则宁可不显示。
+    ///
+    /// `artistPreFiltered` 给 LRCLIB 用：它的搜索本来就带 artist 参数过滤过，
+    /// 而它的元数据里中文歌手常写成英文名（周杰伦 → Jay Chou），
+    /// 再按字面比对歌手就会白白丢掉 2 分，把本来有的歌词判死。
     private static func matchScore(candidateTitle: String, candidateArtists: [String],
                                    candidateDuration: Double,
-                                   title: String, artist: String, duration: Double) -> Double {
+                                   title: String, artist: String, duration: Double,
+                                   artistPreFiltered: Bool = false) -> Double {
         // 时长是最硬的判据：对不上就是另一个录音，后面再像也没意义
         let delta = abs(candidateDuration - duration)
         guard delta < 8 else { return -100 }
@@ -254,6 +281,7 @@ enum LyricsService {
         let target = normalize(artist)
         if arts.contains(target) { score += 2 }
         else if arts.contains(where: { $0.contains(target) || target.contains($0) }) { score += 1 }
+        else if artistPreFiltered { score += 2 }   // 搜索时已按歌手过滤，字面对不上不代表不是同一人
 
         // 版本标记必须完全一致，差一个就基本判死
         score += (versionTags(title) == versionTags(candidateTitle)) ? 1 : -4

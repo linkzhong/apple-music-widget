@@ -26,7 +26,6 @@ func makeEntry(at seconds: Double) -> MusicEntry {
 
     let lyrics = Lyrics.sample
     var entry = MusicEntry(date: Date(), state: state)
-    entry.angle = seconds * 3.5
     entry.artworkPath = artworkPath
 
     let current = lyrics.index(at: seconds)
@@ -57,6 +56,27 @@ func render(_ item: (name: String, family: WidgetFamily, size: CGSize), entry: M
     let url = URL(fileURLWithPath: outDir).appendingPathComponent("preview_\(item.name).png")
     try? png?.write(to: url)
     print(url.path)
+}
+
+// 用三种歌名各渲染一次，专门验证按钮位置会不会跟着歌名变
+let titles = [("short", "Die For You"),
+              ("long", "Running Up That Hill (A Deal With God)"),
+              ("cjk", "到处不存在的我")]
+for (tag, t) in titles {
+    var e = makeEntry(at: 43)
+    e.state.title = t
+    MainActor.assumeIsolated {
+        let view = NowPlayingWidgetView(entry: e, familyOverride: .systemSmall)
+            .frame(width: 155, height: 155)
+        let r = ImageRenderer(content: view)
+        r.scale = 3
+        if let cg = r.cgImage {
+            let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
+            let u = URL(fileURLWithPath: outDir).appendingPathComponent("btn_\(tag).png")
+            try? png?.write(to: u)
+            print(u.path)
+        }
+    }
 }
 
 // 取 43 秒这个点：正好落在第三句歌词上

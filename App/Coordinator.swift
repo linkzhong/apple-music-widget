@@ -19,8 +19,20 @@ final class Coordinator: ObservableObject {
     private var timer: Timer?
     private var commandWatcher: DispatchSourceFileSystemObject?
     private var lyricsTask: Task<Void, Never>?
-    /// 已经查过歌词的曲目，避免同一首歌反复请求
-    private var lyricsFetchedFor = ""
+    /// 每首歌查歌词的尝试次数。
+    ///
+    /// 记次数而不是「查过就不再查」：网络抖一下、超时一次，那首歌就被永久
+    /// 标记成查过了，再也不会重试 —— 表现就是这首歌一直没歌词，直到你切走再切回来。
+    /// 曲库里明明有，纯粹是一次性失败被当成了最终结论。
+    private var lyricsAttempts: [String: Int] = [:]
+    private let maxLyricsAttempts = 3
+    /// 正在查歌词的那首曲目。
+    ///
+    /// 有它才能避免把自己的任务掐死：换歌时 Music 的 playerInfo 通知会触发两次
+    /// refresh（隔 400ms，第二次用来补准进度），而第一次的 state 还没写回，
+    /// 第二次仍判定为「换歌」—— 于是无条件 cancel 掉正在跑的那个查询。
+    /// 被取消的任务既不重试也不标记失败，界面就永远停在「正在查找歌词…」。
+    private var lyricsFetchingFor: String?
 
     private init() {}
 
@@ -78,9 +90,13 @@ final class Coordinator: ObservableObject {
         var next = fresh
         let trackChanged = !next.isSameTrack(as: state)
 
-        // 封面只在换歌时取一次
+        // 封面只在换歌时发起一次，失败由 fetchArtwork 自己延迟重试。
+        //
+        // 这里千万不能写成「artworkFile 还是空就再抓」—— 轮询每 2 秒跑一遍 apply，
+        // 那等于封面一旦抓不到就每 2 秒发一次请求、永不停止，很快会被接口限流；
+        // 而歌词走的是同一批出口，会被一起拖下水，表现就是封面和歌词同时消失。
         if next.hasTrack {
-            if trackChanged || state.artworkFile == nil {
+            if trackChanged {
                 fetchArtwork(for: next)
             } else {
                 next.artworkFile = state.artworkFile
@@ -119,7 +135,7 @@ final class Coordinator: ObservableObject {
 
     /// 两级：本地文件曲目 AppleScript 直接能取到原图；
     /// 流媒体曲目取不到，退回 iTunes 官方接口按时长匹配同一首歌的封面。
-    private func fetchArtwork(for target: PlayerState) {
+    private func fetchArtwork(for target: PlayerState, attempt: Int = 0) {
         let trackID = target.trackID
         guard !trackID.isEmpty else { return }
 
@@ -132,11 +148,23 @@ final class Coordinator: ObservableObject {
                 return
             }
             Task {
-                guard let remote = await ArtworkService.fetch(
+                let remote = await ArtworkService.fetch(
                     title: target.title, artist: target.artist, album: target.album,
                     duration: target.duration, trackID: trackID
-                ) else { return }
-                await MainActor.run { self.applyArtwork(remote.file, color: remote.color, for: trackID) }
+                )
+                await MainActor.run {
+                    if let remote {
+                        self.applyArtwork(remote.file, color: remote.color, for: trackID)
+                        return
+                    }
+                    // 没拿到就退避重试，间隔翻倍；用完就作罢，等下次换歌再说。
+                    // 重试必须由这里发起而不是靠轮询，否则就变成每 2 秒一次的死循环。
+                    guard attempt < 2, self.state.trackID == trackID else { return }
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: UInt64(3 + attempt * 5) * 1_000_000_000)
+                        await MainActor.run { self?.fetchArtwork(for: target, attempt: attempt + 1) }
+                    }
+                }
             }
         }
     }
@@ -154,10 +182,16 @@ final class Coordinator: ObservableObject {
     private func fetchLyricsIfNeeded() {
         let target = state
         guard target.hasTrack, !target.title.isEmpty else { return }
-        guard lyricsFetchedFor != target.trackID else { return }
-        lyricsFetchedFor = target.trackID
+        // 已经拿到这首的歌词就不用再查
+        guard !(lyrics.trackID == target.trackID && !lyrics.isEmpty) else { return }
+        let attempts = lyricsAttempts[target.trackID] ?? 0
+        guard attempts < maxLyricsAttempts else { return }
+        // 这首正在查就让它查完，别重复发起、更别把它掐掉
+        guard lyricsFetchingFor != target.trackID else { return }
+        lyricsAttempts[target.trackID] = attempts + 1
 
-        lyricsTask?.cancel()
+        lyricsTask?.cancel()          // 只有换歌了才轮得到这一句
+        lyricsFetchingFor = target.trackID
         lyricsTask = Task { [weak self] in
             let found = await LyricsService.fetch(
                 title: target.title,
@@ -165,21 +199,39 @@ final class Coordinator: ObservableObject {
                 album: target.album,
                 duration: target.duration
             )
-            guard !Task.isCancelled else { return }
             await MainActor.run {
-                guard let self, self.state.trackID == target.trackID else { return }
-                var result = found ?? Lyrics(trackID: target.trackID, source: "", missing: true)
-                result.trackID = target.trackID
-                if found == nil { result.missing = true }
-                self.lyrics = result
-                SharedStore.save(lyrics: result)
-                self.reloadWidgets()
+                guard let self else { return }
+                self.lyricsFetchingFor = nil
+                guard self.state.trackID == target.trackID else { return }
+
+                if var result = found {
+                    result.trackID = target.trackID
+                    self.lyrics = result
+                    SharedStore.save(lyrics: result)
+                    self.reloadWidgets()
+                    return
+                }
+
+                // 没查到。还有重试机会就过几秒再来一次 —— 多数失败是网络抖动，
+                // 而不是曲库真的没有；只有把机会用完了才敢下「没有歌词」的结论。
+                let used = self.lyricsAttempts[target.trackID] ?? 0
+                if used < self.maxLyricsAttempts {
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 4_000_000_000)
+                        await MainActor.run { self?.fetchLyricsIfNeeded() }
+                    }
+                } else {
+                    self.lyrics = Lyrics(trackID: target.trackID, source: "", missing: true)
+                    SharedStore.save(lyrics: self.lyrics)
+                    self.reloadWidgets()
+                }
             }
         }
     }
 
     func refetchLyrics() {
-        lyricsFetchedFor = ""
+        lyricsAttempts.removeValue(forKey: state.trackID)
+        lyrics = Lyrics(trackID: state.trackID)
         fetchLyricsIfNeeded()
     }
 
